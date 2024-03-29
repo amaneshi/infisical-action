@@ -1,0 +1,5 @@
+const WILDCARD = '*';
+
+export {
+    WILDCARD
+};

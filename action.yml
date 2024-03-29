@@ -1,0 +1,46 @@
+name: 'Infisical Secrets'
+description: 'A Github Action that allows you to consume Infisical secrets as secure environment variables'
+inputs:
+  url:
+    description: 'Infisical API URL (defaults to https://app.infisical.com)'
+    required: false
+    default: 'https://app.infisical.com'
+  secrets:
+    description: 'A semicolon-separated list of secrets to retrieve. These will automatically be converted to environmental variable keys. See README for more details'
+    required: false
+  workspaceId:
+    description: 'Infisical Project ID'
+    required: true
+  environment:
+    description: 'The environment slug to fetch secrets for (e.g., staging, prod)'
+    required: true
+  clientId:
+    description: 'The client ID for Universal authentication'
+    required: true
+  clientSecret:
+    description: 'The client secret for Universal authentication'
+    required: true
+  extraHeaders:
+    description: 'A string of newline separated extra headers to include on every request.'
+    required: false
+  exportEnv:
+    description: 'Whether or not export secrets as environment variables.'
+    required: false
+    default: 'true'
+  tlsSkipVerify:
+    description: 'When set to true, disables verification of the backend server certificate.  Setting this to true in production is not recommended.'
+    required: false
+    default: 'false'
+  secretEncodingType:
+    description: 'The encoding type of the secret to decode. If not specified, the secret will not be decoded. Supported values: base64, hex, utf8'
+    required: false
+  ignoreNotFound:
+    description: 'Whether or not the action should exit successfully if some requested secrets were not found.'
+    required: false
+    default: 'false'
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
+branding:
+  icon: 'unlock'
+  color: 'gray-dark'
