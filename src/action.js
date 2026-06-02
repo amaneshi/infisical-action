@@ -1,32 +1,37 @@
-import core from '@actions/core';
-import got from 'got';
+import * as core from '@actions/core';
+import { default as got } from 'got';
+import { Buffer } from 'node:buffer';
 
-import {normalizeOutputKey} from './utils.js';
-import {retrieveToken} from './auth.js';
-import {getSecrets} from './secrets.js';
+import { normalizeOutputKey } from './utils.js';
+import { retrieveToken } from './auth.js';
+import { getSecrets } from './secrets.js';
 
 const ENCODING_TYPES = ['base64', 'hex', 'utf8'];
 
 async function exportSecrets() {
-    const backendUrl = core.getInput('url', {required: true});
-    const workspaceId = core.getInput('workspaceId', {required: true});
-    const environment = core.getInput('environment', {required: true});
-    const extraHeaders = parseHeadersInput('extraHeaders', {required: false});
-    const exportEnv = core.getInput('exportEnv', {required: false}) !== 'false';
+    const backendUrl = core.getInput('url', { required: true });
+    const workspaceId = core.getInput('workspaceId', { required: true });
+    const environment = core.getInput('environment', { required: true });
+    const extraHeaders = parseHeadersInput('extraHeaders', { required: false });
+    const exportEnv = core.getInput('exportEnv', { required: false }) !== 'false';
 
-    const secretsInput = core.getInput('secrets', {required: false});
+    const secretsInput = core.getInput('secrets', { required: false });
     const secretRequests = parseSecretsInput(secretsInput);
 
-    const secretEncodingType = core.getInput('secretEncodingType', {required: false});
-    const ignoreNotFound = (core.getInput('ignoreNotFound', {required: false}) || 'false').toLowerCase() !== 'false';
+    const secretEncodingType = core.getInput('secretEncodingType', { required: false });
+    const ignoreNotFound = (core.getInput('ignoreNotFound', { required: false }) || 'false').toLowerCase() !== 'false';
 
     const defaultOptions = {
         prefixUrl: backendUrl,
+        /** @type {import('got').Headers} */
         headers: {},
+        /** @type {import('got').HttpsOptions} */
         https: {},
+        /** @type {import('got').SearchParameters} */
+        searchParams: {},
         retry: {
             statusCodes: [
-                ...got.defaults.options.retry.statusCodes,
+                ...(got.defaults.options.retry.statusCodes ?? []),
                 // Backend returns 412 when the token in use hasn't yet been replicated
                 // to the performance replica queried. See issue #332.
                 412,
@@ -34,7 +39,7 @@ async function exportSecrets() {
         }
     }
 
-    const tlsSkipVerify = (core.getInput('tlsSkipVerify', {required: false}) || 'false').toLowerCase() !== 'false';
+    const tlsSkipVerify = (core.getInput('tlsSkipVerify', { required: false }) || 'false').toLowerCase() !== 'false';
     if (tlsSkipVerify === true) {
         defaultOptions.https.rejectUnauthorized = false;
     }
@@ -46,7 +51,7 @@ async function exportSecrets() {
     const authToken = await retrieveToken(got.extend(defaultOptions));
     core.setSecret(authToken)
     defaultOptions.headers['Authorization'] = "Bearer " + authToken;
-    defaultOptions.searchParams = {workspaceId: workspaceId, environment: environment};
+    defaultOptions.searchParams = { workspaceId: workspaceId, environment: environment };
     const client = got.extend(defaultOptions);
 
     const results = await getSecrets(secretRequests, client, ignoreNotFound);
@@ -64,7 +69,7 @@ async function exportSecrets() {
         }
 
         // if a secret is encoded, decode it
-        if (ENCODING_TYPES.includes(secretEncodingType)) {
+        if (ENCODING_TYPES.includes(secretEncodingType) && Buffer.isEncoding(secretEncodingType)) {
             value = Buffer.from(value, secretEncodingType).toString();
         }
 
@@ -134,6 +139,10 @@ function parseSecretsInput(secretsInput) {
         if (!outputVarName) {
             outputVarName = normalizeOutputKey(selector);
             envVarName = normalizeOutputKey(selector, true);
+        }
+
+        if (envVarName === null) {
+            throw new Error('envVarName cannot be null');
         }
 
         output.push({

@@ -4,14 +4,14 @@
  * @param {boolean=} isEnvVar
  */
 function normalizeOutputKey(dataKey, isEnvVar = false) {
-  let outputKey = dataKey
-    .replace(".", "__")
-    .replace(new RegExp("-", "g"), "")
-    .replace(/[^\p{L}\p{N}_-]/gu, "");
-  if (isEnvVar) {
-    outputKey = outputKey.toUpperCase();
-  }
-  return outputKey;
+    let outputKey = dataKey
+        .replace(".", "__")
+        .replace(new RegExp("-", "g"), "")
+        .replace(/[^\p{L}\p{N}_-]/gu, "");
+    if (isEnvVar) {
+        outputKey = outputKey.toUpperCase();
+    }
+    return outputKey;
 }
 
 export {

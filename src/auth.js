@@ -1,6 +1,5 @@
-// @ts-check
-import core from '@actions/core';
-import got from 'got';
+import * as core from '@actions/core';
+import * as got from 'got';
 
 /***
  * Authenticate with Infisical and retrieve a Bearer token that can be used for requests.
@@ -8,9 +7,9 @@ import got from 'got';
  */
 async function retrieveToken(client) {
     const path = `api/v1/auth/universal-auth/login`
-    const clientId = core.getInput('clientId', {required: true});
-    const clientSecret = core.getInput('clientSecret', {required: true});
-    return await getClientToken(client, path, {clientId: clientId, clientSecret: clientSecret});
+    const clientId = core.getInput('clientId', { required: true });
+    const clientSecret = core.getInput('clientSecret', { required: true });
+    return await getClientToken(client, path, { clientId: clientId, clientSecret: clientSecret });
 }
 
 /***
@@ -20,11 +19,8 @@ async function retrieveToken(client) {
  * @param {any} payload
  */
 async function getClientToken(client, path, payload) {
-    /** @type {'json'} */
-    const responseType = 'json';
     const options = {
         json: payload,
-        responseType,
     };
 
     core.debug(`Retrieving Auth Token from ${path} endpoint`);
@@ -32,7 +28,7 @@ async function getClientToken(client, path, payload) {
     /** @type {import('got').Response<LoginResponse>} */
     let response;
     try {
-        response = await client.post(`${path}`, options);
+        response = await client.post(`${path}`, options).json();
     } catch (err) {
         if (err instanceof got.HTTPError) {
             throw Error(`failed to retrieve auth token. code: ${err.code}, message: ${err.message}, loginResponse: ${JSON.stringify(err.response.body)}`)
@@ -40,10 +36,10 @@ async function getClientToken(client, path, payload) {
             throw err
         }
     }
-    if (response && response.body && response.body.accessToken) {
+    if (response?.body?.auth?.accessToken) {
         core.debug('✔ Auth Token successfully retrieved');
 
-        return response.body.accessToken;
+        return response.body.auth.accessToken;
     } else {
         throw Error(`Unable to retrieve token from Universal Auth endpoint.`);
     }

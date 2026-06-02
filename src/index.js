@@ -1,5 +1,5 @@
-import auth from './auth.js';
-import secrets from './secrets.js';
+import * as auth from './auth.js';
+import * as secrets from './secrets.js';
 
 export default {
     auth,

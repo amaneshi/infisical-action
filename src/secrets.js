@@ -1,37 +1,38 @@
-import core from '@actions/core';
-import {WILDCARD} from './constants.js';
-import {normalizeOutputKey} from './utils.js';
+import * as core from '@actions/core';
+import * as got from 'got';
+import { WILDCARD } from './constants.js';
+import { normalizeOutputKey } from './utils.js';
 
 /**
  * @typedef {Object} SecretRequest
  * @property {string} path
  * @property {string} selector
+ * @property {string} [outputVarName]
+ * @property {string} [envVarName]
  */
 
 /**
- * @template {SecretRequest} TRequest
  * @typedef {Object} SecretResponse
- * @property {TRequest} request
+ * @property {SecretRequest} request
  * @property {string} value
  * @property {boolean} cachedResponse
  */
 
 /**
- * @template TRequest
- * @param {Array<TRequest>} secretRequests
+ * @param {Array<SecretRequest>} secretRequests
  * @param {import('got').Got} client
- * @param ignoreNotFound
- * @return {Promise<SecretResponse<TRequest>[]>}
+ * @param {boolean} ignoreNotFound
+ * @return {Promise<SecretResponse[]>}
  */
 async function getSecrets(secretRequests, client, ignoreNotFound) {
     const responseCache = new Map();
     let results = [];
 
     for (const secretRequest of secretRequests) {
-        let {path, selector} = secretRequest;
+        let { path, selector } = secretRequest;
 
         const pathSelector = selector !== WILDCARD ? normalizeOutputKey(selector, true) : '';
-        const requestPath = `api/v3/secrets/raw/${pathSelector}?secretPath=${encodeURIComponent(path)}`;
+        const requestPath = `api/v3/secrets/raw/${pathSelector}`;
         /** @type {any} */
         let body;
         let cachedResponse = false;
@@ -40,35 +41,35 @@ async function getSecrets(secretRequests, client, ignoreNotFound) {
             cachedResponse = true;
         } else {
             try {
-                const result = await client.extend('', {
+                const result = await client.extend({
                     searchParams: {
                         secretPath: path
                     }
-                }).get(requestPath)
+                }).get(requestPath).json()
                 body = result.body;
                 responseCache.set(requestPath, body);
             } catch (error) {
-                const {response} = error;
-                if (response?.statusCode === 400) {
-                    let notFoundMsg = `Unable to retrieve result for "${path}/${pathSelector}" because it was not found: ${response.body.trim()}`;
-                    if (ignoreNotFound) {
-                        core.error(`✘ ${notFoundMsg}`);
-                        continue;
-                    } else {
-                        throw Error(notFoundMsg)
+                if (error instanceof got.HTTPError) {
+                    const { response } = error;
+                    if (response?.statusCode === 400) {
+                        let notFoundMsg = `Unable to retrieve result for "${path}/${pathSelector}" because it was not found: ${response.body.trim()}`;
+                        if (ignoreNotFound) {
+                            core.error(`✘ ${notFoundMsg}`);
+                            continue;
+                        } else {
+                            throw Error(notFoundMsg)
+                        }
                     }
                 }
                 throw error
             }
         }
 
-        body = JSON.parse(body);
-
         if (selector === WILDCARD) {
             /** @type {InfisicalSecret[]} */
             const secrets = body.secrets;
             for (const secret of secrets) {
-                let newRequest = Object.assign({}, secretRequest);
+                let newRequest = { ...secretRequest };
                 newRequest.selector = secret.secretKey;
 
                 if (secretRequest.selector === secretRequest.outputVarName) {
