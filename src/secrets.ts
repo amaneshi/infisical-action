@@ -13,7 +13,6 @@ interface SecretRequest {
 interface SecretResponse {
     request: SecretRequest;
     value: string;
-    cachedResponse: boolean;
 }
 
 /**
@@ -22,89 +21,125 @@ interface SecretResponse {
  * @param {boolean} ignoreNotFound
  * @return {Promise<SecretResponse[]>}
  */
-async function getSecrets(secretRequests: Array<SecretRequest>, client: import('got').Got, ignoreNotFound: boolean): Promise<SecretResponse[]> {
-    const responseCache = new Map();
-    let results = [];
+async function getSecrets(secretRequests: SecretRequest[], client: got.Got, ignoreNotFound: boolean): Promise<SecretResponse[]> {
+    const secretGroups = new Map<string, SecretRequest[]>();
+    let results: SecretResponse[] = [];
 
     for (const secretRequest of secretRequests) {
-        let {path, selector} = secretRequest;
-
-        const pathSelector = selector !== WILDCARD ? normalizeOutputKey(selector, true) : '';
-        const requestPath = `api/v3/secrets/raw/${pathSelector}`;
-        let body: InfisicalSecretResponse;
-        let cachedResponse = false;
-        if (responseCache.has(requestPath)) {
-            body = responseCache.get(requestPath);
-            cachedResponse = true;
-        } else {
-            try {
-                body = await client.extend({
-                    searchParams: {
-                        secretPath: path
-                    }
-                }).get(requestPath).json();
-                responseCache.set(requestPath, body);
-            } catch (error) {
-                if (error instanceof got.HTTPError) {
-                    const {response} = error;
-                    if (response?.statusCode === 400) {
-                        let notFoundMsg = `Unable to retrieve result for "${path}/${pathSelector}" because it was not found: ${response.body.trim()}`;
-                        if (ignoreNotFound) {
-                            core.error(`✘ ${notFoundMsg}`);
-                            continue;
-                        } else {
-                            throw Error(notFoundMsg)
-                        }
-                    }
-                }
-                throw error
-            }
+        if (secretGroups.has(secretRequest.path)) {
+            secretGroups.set(secretRequest.path, [...secretGroups.get(secretRequest.path)!, secretRequest]);
+            continue;
         }
-
-        if (selector === WILDCARD) {
-            const secrets: InfisicalSecret[] = body.secrets;
-            for (const secret of secrets) {
-                let newRequest = {...secretRequest};
-                newRequest.selector = secret.secretKey;
-
-                if (secretRequest.selector === secretRequest.outputVarName) {
-                    newRequest.outputVarName = secret.secretKey;
-                    newRequest.envVarName = secret.secretKey;
-                } else {
-                    newRequest.outputVarName = secretRequest.outputVarName + secret.secretKey;
-                    newRequest.envVarName = secretRequest.envVarName + secret.secretKey;
-                }
-
-                if (newRequest.outputVarName === undefined || newRequest.envVarName === undefined) {
-                    core.error(`Unable to retrieve result for "${path}/${pathSelector}" because it was not found`);
-                    continue;
-                }
-
-                newRequest.outputVarName = normalizeOutputKey(newRequest.outputVarName);
-                newRequest.envVarName = normalizeOutputKey(newRequest.envVarName, true);
-
-                results.push({
-                    request: newRequest,
-                    value: secret.secretValue,
-                    cachedResponse,
+        secretGroups.set(secretRequest.path, [secretRequest]);
+    }
+    for (const [secretPath, secretRequests] of secretGroups) {
+        try {
+            if (secretRequests.length === 1 && secretRequests[0].selector !== WILDCARD) {
+                await getSingleSecret(secretRequests[0], client).then((responses) => {
+                    responses.forEach((result) => {
+                        results.push(result);
+                    });
                 });
+                continue;
             }
-        } else {
-            const secret: InfisicalSecret = body.secret;
-            results.push({
-                request: secretRequest,
-                value: secret.secretValue,
-                cachedResponse,
+            await getMultipleSecrets(secretPath, secretRequests, client).then((responses) => {
+                responses.forEach((result) => {
+                    results.push(result);
+                });
             });
+        } catch (error) {
+            if (error instanceof got.HTTPError) {
+                const {response} = error;
+                if (response?.statusCode === 400) {
+                    let notFoundMsg = `Unable to retrieve result for "${secretPath}}" because it was not found: ${response.body.trim()}`;
+                    if (ignoreNotFound) {
+                        core.error(`✘ ${notFoundMsg}`);
+                        continue;
+                    } else {
+                        throw Error(notFoundMsg)
+                    }
+                }
+            }
+            throw error
         }
     }
 
     return results;
 }
 
+/***
+ * Retrieve a single secret.
+ * @param {SecretRequest} secretRequest
+ * @param {import('got').Got} client
+ */
+async function getSingleSecret(secretRequest: SecretRequest, client: got.Got): Promise<SecretResponse[]> {
+    let {path, selector} = secretRequest;
+
+    const pathSelector = normalizeOutputKey(selector, true);
+    const requestPath = `api/v4/secrets/${pathSelector}`;
+    return await client.extend({
+        searchParams: {
+            secretPath: path
+        }
+    }).get(requestPath).json<InfisicalSecretResponse>().then((body) => {
+        return [{
+            request: secretRequest,
+            value: body.secret.secretValue,
+        }];
+    }).catch((error) => {
+        throw error
+    });
+}
+
+/***
+ * Retrieve a multiple secrets.
+ * @param {string} path
+ * @param {SecretRequest[]} secretRequests
+ * @param {import('got').Got} client
+ */
+async function getMultipleSecrets(path: string, secretRequests: SecretRequest[], client: got.Got): Promise<SecretResponse[]> {
+    const requestsMap = new Map<string, SecretRequest>();
+    for (const secretRequest of secretRequests) {
+        if (requestsMap.has(secretRequest.selector)) {
+            throw Error(`Duplicate key found: "${path}/${secretRequest.selector}"`);
+        }
+        requestsMap.set(secretRequest.selector, secretRequest);
+    }
+
+    const requestPath = `api/v4/secrets`;
+    return await client.extend({
+        searchParams: {secretPath: path}
+    }).get(requestPath).json<InfisicalSecretsResponse>().then((body) => {
+        const secrets: InfisicalSecret[] = body.secrets;
+        if (requestsMap.has(WILDCARD)) {
+            return secrets?.map(secret => ({
+                request: {
+                    path: secret.secretKey,
+                    selector: secret.secretKey,
+                    outputVarName: normalizeOutputKey(secret.secretKey)!,
+                    envVarName: normalizeOutputKey(secret.secretKey, true)!,
+                },
+                value: secret.secretValue,
+            }));
+        }
+        return secrets?.filter(
+            secret => requestsMap.has(secret.secretKey)
+        )?.map(secret => ({
+                request: requestsMap.get(secret.secretKey)!,
+                value: secret.secretValue,
+            })
+        )
+    }).catch((error) => {
+        throw error
+    });
+}
+
 interface InfisicalSecretResponse {
-    secret: InfisicalSecret; // for single secret
-    secrets: InfisicalSecret[]; // for multiple secrets (wildcard)
+    secret: InfisicalSecret;
+}
+
+interface InfisicalSecretsResponse {
+    secrets: InfisicalSecret[];
 }
 
 interface InfisicalSecret {

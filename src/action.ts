@@ -48,7 +48,7 @@ async function exportSecrets() {
     const authToken = await retrieveToken(got.default.extend(defaultOptions));
     core.setSecret(authToken)
     defaultOptions.headers['Authorization'] = "Bearer " + authToken;
-    defaultOptions.searchParams = {workspaceId: workspaceId, environment: environment};
+    defaultOptions.searchParams = {projectId: workspaceId, environment: environment};
     const client = got.default.extend(defaultOptions);
 
     const results = await getSecrets(secretRequests, client, ignoreNotFound);
@@ -59,11 +59,6 @@ async function exportSecrets() {
 
         let value = result.value;
         const request = result.request;
-        const cachedResponse = result.cachedResponse;
-
-        if (cachedResponse) {
-            core.debug('ℹ using cached response');
-        }
 
         // if a secret is encoded, decode it
         if (ENCODING_TYPES.includes(secretEncodingType) && Buffer.isEncoding(secretEncodingType)) {
@@ -76,9 +71,9 @@ async function exportSecrets() {
             }
         }
         if (exportEnv) {
-            core.exportVariable(request.envVarName ?? '', `${value}`);
+            core.exportVariable(request.envVarName!, `${value}`);
         }
-        core.setOutput(request.outputVarName ?? '', `${value}`);
+        core.setOutput(request.outputVarName!, `${value}`);
         core.debug(`✔ ${request.path} => outputs.${request.outputVarName}${exportEnv ? ` | env.${request.envVarName}` : ''}`);
     }
 }
@@ -107,18 +102,13 @@ function parseSecretsInput(secretsInput: string): SecretRequest[] {
 
     const output: SecretRequest[] = [];
     for (const secret of secrets) {
-        let pathSpec = secret;
-        let outputVarName = null;
 
-        const renameSigilIndex = secret.lastIndexOf('|');
-        if (renameSigilIndex > -1) {
-            pathSpec = secret.substring(0, renameSigilIndex).trim();
-            outputVarName = secret.substring(renameSigilIndex + 1).trim();
+        const secretParts = secret
+            .split('|')
+            .map(part => part.trim())
+            .filter(part => part.length !== 0);
 
-            if (outputVarName.length < 1) {
-                throw Error(`You must provide a value when mapping a secret to a name. Input: "${secret}"`);
-            }
-        }
+        let pathSpec = secretParts[0];
 
         const pathParts = pathSpec
             .split(/\s+/)
@@ -131,15 +121,8 @@ function parseSecretsInput(secretsInput: string): SecretRequest[] {
 
         const [path, selector] = pathParts;
 
-        let envVarName = outputVarName;
-        if (!outputVarName) {
-            outputVarName = normalizeOutputKey(selector);
-            envVarName = normalizeOutputKey(selector, true);
-        }
-
-        if (envVarName === null) {
-            throw new Error('envVarName cannot be null');
-        }
+        let outputVarName = secretParts.length > 1 ? secretParts[1] : normalizeOutputKey(selector);
+        let envVarName = secretParts.length > 1 ? secretParts[1] : normalizeOutputKey(selector, true);
 
         output.push({
             path,

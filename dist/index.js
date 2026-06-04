@@ -44876,7 +44876,7 @@ async function getClientToken(client, path, payload) {
     core_debug(`Retrieving Auth Token from ${path} endpoint`);
     let response;
     try {
-        response = await client.post(`${path}`, options).json();
+        response = await client.post(path, options).json();
     }
     catch (err) {
         if (err instanceof HTTPError) {
@@ -44886,7 +44886,7 @@ async function getClientToken(client, path, payload) {
             throw err;
         }
     }
-    if (response?.accessToken) {
+    if (response.accessToken) {
         core_debug('✔ Auth Token successfully retrieved');
         return response.accessToken;
     }
@@ -44897,7 +44897,6 @@ async function getClientToken(client, path, payload) {
 
 
 ;// CONCATENATED MODULE: ./src/constants.ts
-// @ts-check
 const WILDCARD = '*';
 
 
@@ -44913,80 +44912,109 @@ const WILDCARD = '*';
  * @return {Promise<SecretResponse[]>}
  */
 async function getSecrets(secretRequests, client, ignoreNotFound) {
-    const responseCache = new Map();
+    const secretGroups = new Map();
     let results = [];
     for (const secretRequest of secretRequests) {
-        let { path, selector } = secretRequest;
-        const pathSelector = selector !== WILDCARD ? normalizeOutputKey(selector, true) : '';
-        const requestPath = `api/v3/secrets/raw/${pathSelector}`;
-        let body;
-        let cachedResponse = false;
-        if (responseCache.has(requestPath)) {
-            body = responseCache.get(requestPath);
-            cachedResponse = true;
+        if (secretGroups.has(secretRequest.path)) {
+            secretGroups.set(secretRequest.path, [...secretGroups.get(secretRequest.path), secretRequest]);
+            continue;
         }
-        else {
-            try {
-                body = await client.extend({
-                    searchParams: {
-                        secretPath: path
-                    }
-                }).get(requestPath).json();
-                responseCache.set(requestPath, body);
-            }
-            catch (error) {
-                if (error instanceof HTTPError) {
-                    const { response } = error;
-                    if (response?.statusCode === 400) {
-                        let notFoundMsg = `Unable to retrieve result for "${path}/${pathSelector}" because it was not found: ${response.body.trim()}`;
-                        if (ignoreNotFound) {
-                            core_error(`✘ ${notFoundMsg}`);
-                            continue;
-                        }
-                        else {
-                            throw Error(notFoundMsg);
-                        }
-                    }
-                }
-                throw error;
-            }
-        }
-        if (selector === WILDCARD) {
-            const secrets = body.secrets;
-            for (const secret of secrets) {
-                let newRequest = { ...secretRequest };
-                newRequest.selector = secret.secretKey;
-                if (secretRequest.selector === secretRequest.outputVarName) {
-                    newRequest.outputVarName = secret.secretKey;
-                    newRequest.envVarName = secret.secretKey;
-                }
-                else {
-                    newRequest.outputVarName = secretRequest.outputVarName + secret.secretKey;
-                    newRequest.envVarName = secretRequest.envVarName + secret.secretKey;
-                }
-                if (newRequest.outputVarName === undefined || newRequest.envVarName === undefined) {
-                    core_error(`Unable to retrieve result for "${path}/${pathSelector}" because it was not found`);
-                    continue;
-                }
-                newRequest.outputVarName = normalizeOutputKey(newRequest.outputVarName);
-                newRequest.envVarName = normalizeOutputKey(newRequest.envVarName, true);
-                results.push({
-                    request: newRequest,
-                    value: secret.secretValue,
-                    cachedResponse,
+        secretGroups.set(secretRequest.path, [secretRequest]);
+    }
+    for (const [secretPath, secretRequests] of secretGroups) {
+        try {
+            if (secretRequests.length === 1 && secretRequests[0].selector !== WILDCARD) {
+                await getSingleSecret(secretRequests[0], client).then((responses) => {
+                    responses.forEach((result) => {
+                        results.push(result);
+                    });
                 });
+                continue;
             }
-        }
-        else {
-            const secret = body.secret;
-            results.push({
-                request: secretRequest,
-                value: secret.secretValue,
-                cachedResponse,
+            await getMultipleSecrets(secretPath, secretRequests, client).then((responses) => {
+                responses.forEach((result) => {
+                    results.push(result);
+                });
             });
+        }
+        catch (error) {
+            if (error instanceof HTTPError) {
+                const { response } = error;
+                if (response?.statusCode === 400) {
+                    let notFoundMsg = `Unable to retrieve result for "${secretPath}}" because it was not found: ${response.body.trim()}`;
+                    if (ignoreNotFound) {
+                        core_error(`✘ ${notFoundMsg}`);
+                        continue;
+                    }
+                    else {
+                        throw Error(notFoundMsg);
+                    }
+                }
+            }
+            throw error;
         }
     }
     return results;
+}
+/***
+ * Retrieve a single secret.
+ * @param {SecretRequest} secretRequest
+ * @param {import('got').Got} client
+ */
+async function getSingleSecret(secretRequest, client) {
+    let { path, selector } = secretRequest;
+    const pathSelector = normalizeOutputKey(selector, true);
+    const requestPath = `api/v4/secrets/${pathSelector}`;
+    return await client.extend({
+        searchParams: {
+            secretPath: path
+        }
+    }).get(requestPath).json().then((body) => {
+        return [{
+                request: secretRequest,
+                value: body.secret.secretValue,
+            }];
+    }).catch((error) => {
+        throw error;
+    });
+}
+/***
+ * Retrieve a multiple secrets.
+ * @param {string} path
+ * @param {SecretRequest[]} secretRequests
+ * @param {import('got').Got} client
+ */
+async function getMultipleSecrets(path, secretRequests, client) {
+    const requestsMap = new Map();
+    for (const secretRequest of secretRequests) {
+        if (requestsMap.has(secretRequest.selector)) {
+            throw Error(`Duplicate key found: "${path}/${secretRequest.selector}"`);
+        }
+        requestsMap.set(secretRequest.selector, secretRequest);
+    }
+    const requestPath = `api/v4/secrets`;
+    return await client.extend({
+        searchParams: { secretPath: path }
+    }).get(requestPath).json().then((body) => {
+        const secrets = body.secrets;
+        if (requestsMap.has(WILDCARD)) {
+            return secrets?.map(secret => ({
+                request: {
+                    path: secret.secretKey,
+                    selector: secret.secretKey,
+                    outputVarName: normalizeOutputKey(secret.secretKey),
+                    envVarName: normalizeOutputKey(secret.secretKey, true),
+                },
+                value: secret.secretValue,
+            }));
+        }
+        return secrets?.filter(secret => requestsMap.has(secret.secretKey))?.map(secret => ({
+            request: requestsMap.get(secret.secretKey),
+            value: secret.secretValue,
+        }));
+    }).catch((error) => {
+        throw error;
+    });
 }
 
 
@@ -45032,17 +45060,13 @@ async function exportSecrets() {
     const authToken = await retrieveToken(dist_source.extend(defaultOptions));
     core_setSecret(authToken);
     defaultOptions.headers['Authorization'] = "Bearer " + authToken;
-    defaultOptions.searchParams = { workspaceId: workspaceId, environment: environment };
+    defaultOptions.searchParams = { projectId: workspaceId, environment: environment };
     const client = dist_source.extend(defaultOptions);
     const results = await getSecrets(secretRequests, client, ignoreNotFound);
     for (const result of results) {
         // Output the result
         let value = result.value;
         const request = result.request;
-        const cachedResponse = result.cachedResponse;
-        if (cachedResponse) {
-            core_debug('ℹ using cached response');
-        }
         // if a secret is encoded, decode it
         if (ENCODING_TYPES.includes(secretEncodingType) && external_node_buffer_.Buffer.isEncoding(secretEncodingType)) {
             value = external_node_buffer_.Buffer.from(value, secretEncodingType).toString();
@@ -45053,9 +45077,9 @@ async function exportSecrets() {
             }
         }
         if (exportEnv) {
-            exportVariable(request.envVarName ?? '', `${value}`);
+            exportVariable(request.envVarName, `${value}`);
         }
-        setOutput(request.outputVarName ?? '', `${value}`);
+        setOutput(request.outputVarName, `${value}`);
         core_debug(`✔ ${request.path} => outputs.${request.outputVarName}${exportEnv ? ` | env.${request.envVarName}` : ''}`);
     }
 }
@@ -45074,16 +45098,11 @@ function parseSecretsInput(secretsInput) {
         .filter(key => key.length !== 0);
     const output = [];
     for (const secret of secrets) {
-        let pathSpec = secret;
-        let outputVarName = null;
-        const renameSigilIndex = secret.lastIndexOf('|');
-        if (renameSigilIndex > -1) {
-            pathSpec = secret.substring(0, renameSigilIndex).trim();
-            outputVarName = secret.substring(renameSigilIndex + 1).trim();
-            if (outputVarName.length < 1) {
-                throw Error(`You must provide a value when mapping a secret to a name. Input: "${secret}"`);
-            }
-        }
+        const secretParts = secret
+            .split('|')
+            .map(part => part.trim())
+            .filter(part => part.length !== 0);
+        let pathSpec = secretParts[0];
         const pathParts = pathSpec
             .split(/\s+/)
             .map(part => part.trim())
@@ -45092,14 +45111,8 @@ function parseSecretsInput(secretsInput) {
             throw Error(`You must provide a valid path and key. Input: "${secret}"`);
         }
         const [path, selector] = pathParts;
-        let envVarName = outputVarName;
-        if (!outputVarName) {
-            outputVarName = normalizeOutputKey(selector);
-            envVarName = normalizeOutputKey(selector, true);
-        }
-        if (envVarName === null) {
-            throw new Error('envVarName cannot be null');
-        }
+        let outputVarName = secretParts.length > 1 ? secretParts[1] : normalizeOutputKey(selector);
+        let envVarName = secretParts.length > 1 ? secretParts[1] : normalizeOutputKey(selector, true);
         output.push({
             path,
             envVarName,

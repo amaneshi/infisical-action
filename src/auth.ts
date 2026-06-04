@@ -27,7 +27,7 @@ async function getClientToken(client: got.Got, path: string, payload: any): Prom
 
     let response: LoginResponse;
     try {
-        response = await client.post(`${path}`, options).json();
+        response = await client.post(path, options).json();
     } catch (err) {
         if (err instanceof got.HTTPError) {
             throw Error(`failed to retrieve auth token. code: ${err.code}, message: ${err.message}, loginResponse: ${JSON.stringify(err.response.body)}`)
@@ -35,7 +35,7 @@ async function getClientToken(client: got.Got, path: string, payload: any): Prom
             throw err
         }
     }
-    if (response?.accessToken) {
+    if (response.accessToken) {
         core.debug('✔ Auth Token successfully retrieved');
 
         return response.accessToken;
