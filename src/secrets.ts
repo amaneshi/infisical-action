@@ -1,22 +1,20 @@
 import * as core from '@actions/core';
 import * as got from 'got';
-import { WILDCARD } from './constants.js';
-import { normalizeOutputKey } from './utils.js';
+import {WILDCARD} from './constants.js';
+import {normalizeOutputKey} from './utils.js';
 
-/**
- * @typedef {Object} SecretRequest
- * @property {string} path
- * @property {string} selector
- * @property {string} [outputVarName]
- * @property {string} [envVarName]
- */
+interface SecretRequest {
+    path: string;
+    selector: string;
+    outputVarName?: string;
+    envVarName?: string;
+}
 
-/**
- * @typedef {Object} SecretResponse
- * @property {SecretRequest} request
- * @property {string} value
- * @property {boolean} cachedResponse
- */
+interface SecretResponse {
+    request: SecretRequest;
+    value: string;
+    cachedResponse: boolean;
+}
 
 /**
  * @param {Array<SecretRequest>} secretRequests
@@ -24,33 +22,31 @@ import { normalizeOutputKey } from './utils.js';
  * @param {boolean} ignoreNotFound
  * @return {Promise<SecretResponse[]>}
  */
-async function getSecrets(secretRequests, client, ignoreNotFound) {
+async function getSecrets(secretRequests: Array<SecretRequest>, client: import('got').Got, ignoreNotFound: boolean): Promise<SecretResponse[]> {
     const responseCache = new Map();
     let results = [];
 
     for (const secretRequest of secretRequests) {
-        let { path, selector } = secretRequest;
+        let {path, selector} = secretRequest;
 
         const pathSelector = selector !== WILDCARD ? normalizeOutputKey(selector, true) : '';
         const requestPath = `api/v3/secrets/raw/${pathSelector}`;
-        /** @type {any} */
-        let body;
+        let body: InfisicalSecretResponse;
         let cachedResponse = false;
         if (responseCache.has(requestPath)) {
             body = responseCache.get(requestPath);
             cachedResponse = true;
         } else {
             try {
-                const result = await client.extend({
+                body = await client.extend({
                     searchParams: {
                         secretPath: path
                     }
-                }).get(requestPath).json()
-                body = result.body;
+                }).get(requestPath).json();
                 responseCache.set(requestPath, body);
             } catch (error) {
                 if (error instanceof got.HTTPError) {
-                    const { response } = error;
+                    const {response} = error;
                     if (response?.statusCode === 400) {
                         let notFoundMsg = `Unable to retrieve result for "${path}/${pathSelector}" because it was not found: ${response.body.trim()}`;
                         if (ignoreNotFound) {
@@ -66,10 +62,9 @@ async function getSecrets(secretRequests, client, ignoreNotFound) {
         }
 
         if (selector === WILDCARD) {
-            /** @type {InfisicalSecret[]} */
-            const secrets = body.secrets;
+            const secrets: InfisicalSecret[] = body.secrets;
             for (const secret of secrets) {
-                let newRequest = { ...secretRequest };
+                let newRequest = {...secretRequest};
                 newRequest.selector = secret.secretKey;
 
                 if (secretRequest.selector === secretRequest.outputVarName) {
@@ -78,6 +73,11 @@ async function getSecrets(secretRequests, client, ignoreNotFound) {
                 } else {
                     newRequest.outputVarName = secretRequest.outputVarName + secret.secretKey;
                     newRequest.envVarName = secretRequest.envVarName + secret.secretKey;
+                }
+
+                if (newRequest.outputVarName === undefined || newRequest.envVarName === undefined) {
+                    core.error(`Unable to retrieve result for "${path}/${pathSelector}" because it was not found`);
+                    continue;
                 }
 
                 newRequest.outputVarName = normalizeOutputKey(newRequest.outputVarName);
@@ -90,8 +90,7 @@ async function getSecrets(secretRequests, client, ignoreNotFound) {
                 });
             }
         } else {
-            /** @type {InfisicalSecret} */
-            const secret = body.secret;
+            const secret: InfisicalSecret = body.secret;
             results.push({
                 request: secretRequest,
                 value: secret.secretValue,
@@ -103,17 +102,21 @@ async function getSecrets(secretRequests, client, ignoreNotFound) {
     return results;
 }
 
-/***
- * @typedef {Object} InfisicalSecret
- * @property {string} environment
- * @property {string} id
- * @property {string} secretComment
- * @property {string} secretKey
- * @property {string} secretValue
- * @property {string} type
- * @property {string} version
- * @property {string} workspace
- */
+interface InfisicalSecretResponse {
+    secret: InfisicalSecret; // for single secret
+    secrets: InfisicalSecret[]; // for multiple secrets (wildcard)
+}
+
+interface InfisicalSecret {
+    environment: string;
+    id: string;
+    secretComment: string;
+    secretKey: string;
+    secretValue: string;
+    type: string;
+    version: string;
+    workspace: string;
+}
 
 export {
     getSecrets

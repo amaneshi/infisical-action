@@ -1,7 +1,12 @@
 import * as core from '@actions/core';
-import { exportSecrets } from './action.js';
+import {exportSecrets} from './action.js';
 
-(async () => {
+/**
+ * The main function for the action.
+ *
+ * @returns {Promise<void>} Resolves when the action is complete.
+ */
+export async function run(): Promise<void> {
     try {
         await core.group('Get Infisical Secrets', exportSecrets);
     } catch (error) {
@@ -9,4 +14,4 @@ import { exportSecrets } from './action.js';
         core.setOutput("errorMessage", message);
         core.setFailed(message);
     }
-})();
+}

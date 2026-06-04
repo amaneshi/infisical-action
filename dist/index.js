@@ -44832,7 +44832,7 @@ const got = source_create(defaults);
 
 
 
-;// CONCATENATED MODULE: ./src/utils.js
+;// CONCATENATED MODULE: ./src/utils.ts
 /**
  * Replaces any dot chars to __ and removes non-ascii charts
  * @param {string} dataKey
@@ -44850,9 +44850,7 @@ function normalizeOutputKey(dataKey, isEnvVar = false) {
 }
 
 
-
-;// CONCATENATED MODULE: ./src/auth.js
-
+;// CONCATENATED MODULE: ./src/auth.ts
 
 
 /***
@@ -44860,12 +44858,11 @@ function normalizeOutputKey(dataKey, isEnvVar = false) {
  * @param {import('got').Got} client
  */
 async function retrieveToken(client) {
-    const path = `api/v1/auth/universal-auth/login`
+    const path = `api/v1/auth/universal-auth/login`;
     const clientId = getInput('clientId', { required: true });
     const clientSecret = getInput('clientSecret', { required: true });
     return await getClientToken(client, path, { clientId: clientId, clientSecret: clientSecret });
 }
-
 /***
  * Call the appropriate login endpoint and parse out the token in the response.
  * @param {import('got').Got} client
@@ -44876,67 +44873,38 @@ async function getClientToken(client, path, payload) {
     const options = {
         json: payload,
     };
-
     core_debug(`Retrieving Auth Token from ${path} endpoint`);
-
-    /** @type {import('got').Response<LoginResponse>} */
     let response;
     try {
         response = await client.post(`${path}`, options).json();
-    } catch (err) {
+    }
+    catch (err) {
         if (err instanceof HTTPError) {
-            throw Error(`failed to retrieve auth token. code: ${err.code}, message: ${err.message}, loginResponse: ${JSON.stringify(err.response.body)}`)
-        } else {
-            throw err
+            throw Error(`failed to retrieve auth token. code: ${err.code}, message: ${err.message}, loginResponse: ${JSON.stringify(err.response.body)}`);
+        }
+        else {
+            throw err;
         }
     }
-    if (response?.body?.auth?.accessToken) {
+    if (response?.accessToken) {
         core_debug('✔ Auth Token successfully retrieved');
-
-        return response.body.auth.accessToken;
-    } else {
+        return response.accessToken;
+    }
+    else {
         throw Error(`Unable to retrieve token from Universal Auth endpoint.`);
     }
 }
 
-/***
- * @typedef {Object} LoginResponse
- * @property {{
- *  accessToken: string;
- *  tokenType: string;
- *  expiresIn: number;
- *  accessTokenMaxTTL: number;
- * }} auth
- */
 
-
-
-;// CONCATENATED MODULE: ./src/constants.js
+;// CONCATENATED MODULE: ./src/constants.ts
 // @ts-check
 const WILDCARD = '*';
 
 
-
-;// CONCATENATED MODULE: ./src/secrets.js
-
+;// CONCATENATED MODULE: ./src/secrets.ts
 
 
 
-
-/**
- * @typedef {Object} SecretRequest
- * @property {string} path
- * @property {string} selector
- * @property {string} [outputVarName]
- * @property {string} [envVarName]
- */
-
-/**
- * @typedef {Object} SecretResponse
- * @property {SecretRequest} request
- * @property {string} value
- * @property {boolean} cachedResponse
- */
 
 /**
  * @param {Array<SecretRequest>} secretRequests
@@ -44947,28 +44915,26 @@ const WILDCARD = '*';
 async function getSecrets(secretRequests, client, ignoreNotFound) {
     const responseCache = new Map();
     let results = [];
-
     for (const secretRequest of secretRequests) {
         let { path, selector } = secretRequest;
-
         const pathSelector = selector !== WILDCARD ? normalizeOutputKey(selector, true) : '';
         const requestPath = `api/v3/secrets/raw/${pathSelector}`;
-        /** @type {any} */
         let body;
         let cachedResponse = false;
         if (responseCache.has(requestPath)) {
             body = responseCache.get(requestPath);
             cachedResponse = true;
-        } else {
+        }
+        else {
             try {
-                const result = await client.extend({
+                body = await client.extend({
                     searchParams: {
                         secretPath: path
                     }
-                }).get(requestPath).json()
-                body = result.body;
+                }).get(requestPath).json();
                 responseCache.set(requestPath, body);
-            } catch (error) {
+            }
+            catch (error) {
                 if (error instanceof HTTPError) {
                     const { response } = error;
                     if (response?.statusCode === 400) {
@@ -44976,41 +44942,42 @@ async function getSecrets(secretRequests, client, ignoreNotFound) {
                         if (ignoreNotFound) {
                             core_error(`✘ ${notFoundMsg}`);
                             continue;
-                        } else {
-                            throw Error(notFoundMsg)
+                        }
+                        else {
+                            throw Error(notFoundMsg);
                         }
                     }
                 }
-                throw error
+                throw error;
             }
         }
-
         if (selector === WILDCARD) {
-            /** @type {InfisicalSecret[]} */
             const secrets = body.secrets;
             for (const secret of secrets) {
                 let newRequest = { ...secretRequest };
                 newRequest.selector = secret.secretKey;
-
                 if (secretRequest.selector === secretRequest.outputVarName) {
                     newRequest.outputVarName = secret.secretKey;
                     newRequest.envVarName = secret.secretKey;
-                } else {
+                }
+                else {
                     newRequest.outputVarName = secretRequest.outputVarName + secret.secretKey;
                     newRequest.envVarName = secretRequest.envVarName + secret.secretKey;
                 }
-
+                if (newRequest.outputVarName === undefined || newRequest.envVarName === undefined) {
+                    core_error(`Unable to retrieve result for "${path}/${pathSelector}" because it was not found`);
+                    continue;
+                }
                 newRequest.outputVarName = normalizeOutputKey(newRequest.outputVarName);
                 newRequest.envVarName = normalizeOutputKey(newRequest.envVarName, true);
-
                 results.push({
                     request: newRequest,
                     value: secret.secretValue,
                     cachedResponse,
                 });
             }
-        } else {
-            /** @type {InfisicalSecret} */
+        }
+        else {
             const secret = body.secret;
             results.push({
                 request: secretRequest,
@@ -45019,27 +44986,11 @@ async function getSecrets(secretRequests, client, ignoreNotFound) {
             });
         }
     }
-
     return results;
 }
 
-/***
- * @typedef {Object} InfisicalSecret
- * @property {string} environment
- * @property {string} id
- * @property {string} secretComment
- * @property {string} secretKey
- * @property {string} secretValue
- * @property {string} type
- * @property {string} version
- * @property {string} workspace
- */
 
-
-
-;// CONCATENATED MODULE: ./src/action.js
-
-
+;// CONCATENATED MODULE: ./src/action.ts
 
 
 
@@ -45047,27 +44998,20 @@ async function getSecrets(secretRequests, client, ignoreNotFound) {
 
 
 const ENCODING_TYPES = ['base64', 'hex', 'utf8'];
-
 async function exportSecrets() {
     const backendUrl = getInput('url', { required: true });
     const workspaceId = getInput('workspaceId', { required: true });
     const environment = getInput('environment', { required: true });
     const extraHeaders = parseHeadersInput('extraHeaders', { required: false });
     const exportEnv = getInput('exportEnv', { required: false }) !== 'false';
-
     const secretsInput = getInput('secrets', { required: false });
     const secretRequests = parseSecretsInput(secretsInput);
-
     const secretEncodingType = getInput('secretEncodingType', { required: false });
     const ignoreNotFound = (getInput('ignoreNotFound', { required: false }) || 'false').toLowerCase() !== 'false';
-
     const defaultOptions = {
         prefixUrl: backendUrl,
-        /** @type {import('got').Headers} */
         headers: {},
-        /** @type {import('got').HttpsOptions} */
         https: {},
-        /** @type {import('got').SearchParameters} */
         searchParams: {},
         retry: {
             statusCodes: [
@@ -45077,114 +45021,85 @@ async function exportSecrets() {
                 412,
             ]
         }
-    }
-
+    };
     const tlsSkipVerify = (getInput('tlsSkipVerify', { required: false }) || 'false').toLowerCase() !== 'false';
-    if (tlsSkipVerify === true) {
+    if (tlsSkipVerify) {
         defaultOptions.https.rejectUnauthorized = false;
     }
-
     for (const [headerName, headerValue] of extraHeaders) {
         defaultOptions.headers[headerName] = headerValue;
     }
-
     const authToken = await retrieveToken(dist_source.extend(defaultOptions));
-    core_setSecret(authToken)
+    core_setSecret(authToken);
     defaultOptions.headers['Authorization'] = "Bearer " + authToken;
     defaultOptions.searchParams = { workspaceId: workspaceId, environment: environment };
     const client = dist_source.extend(defaultOptions);
-
     const results = await getSecrets(secretRequests, client, ignoreNotFound);
-
-
     for (const result of results) {
         // Output the result
-
         let value = result.value;
         const request = result.request;
         const cachedResponse = result.cachedResponse;
-
         if (cachedResponse) {
             core_debug('ℹ using cached response');
         }
-
         // if a secret is encoded, decode it
         if (ENCODING_TYPES.includes(secretEncodingType) && external_node_buffer_.Buffer.isEncoding(secretEncodingType)) {
             value = external_node_buffer_.Buffer.from(value, secretEncodingType).toString();
         }
-
         for (const line of value.replace(/\r/g, '').split('\n')) {
             if (line.length > 0) {
                 core_setSecret(line);
             }
         }
         if (exportEnv) {
-            exportVariable(request.envVarName, `${value}`);
+            exportVariable(request.envVarName ?? '', `${value}`);
         }
-        setOutput(request.outputVarName, `${value}`);
+        setOutput(request.outputVarName ?? '', `${value}`);
         core_debug(`✔ ${request.path} => outputs.${request.outputVarName}${exportEnv ? ` | env.${request.envVarName}` : ''}`);
     }
 }
-
-/** @typedef {Object} SecretRequest
- * @property {string} path
- * @property {string} envVarName
- * @property {string} outputVarName
- * @property {string} selector
- */
-
 /**
  * Parses a secrets input string into key paths and their resulting environment variable name.
  * @param {string} secretsInput
  */
 function parseSecretsInput(secretsInput) {
     if (!secretsInput) {
-        return []
+        return [];
     }
-
     const secrets = secretsInput
         .split(';')
         .filter(key => !!key)
         .map(key => key.trim())
         .filter(key => key.length !== 0);
-
-    /** @type {SecretRequest[]} */
     const output = [];
     for (const secret of secrets) {
         let pathSpec = secret;
         let outputVarName = null;
-
         const renameSigilIndex = secret.lastIndexOf('|');
         if (renameSigilIndex > -1) {
             pathSpec = secret.substring(0, renameSigilIndex).trim();
             outputVarName = secret.substring(renameSigilIndex + 1).trim();
-
             if (outputVarName.length < 1) {
                 throw Error(`You must provide a value when mapping a secret to a name. Input: "${secret}"`);
             }
         }
-
         const pathParts = pathSpec
             .split(/\s+/)
             .map(part => part.trim())
             .filter(part => part.length !== 0);
-
         if (pathParts.length !== 2) {
             throw Error(`You must provide a valid path and key. Input: "${secret}"`);
         }
-
         const [path, selector] = pathParts;
-
         let envVarName = outputVarName;
         if (!outputVarName) {
             outputVarName = normalizeOutputKey(selector);
             envVarName = normalizeOutputKey(selector, true);
         }
-
         if (envVarName === null) {
             throw new Error('envVarName cannot be null');
         }
-
         output.push({
             path,
             envVarName,
@@ -45194,13 +45109,11 @@ function parseSecretsInput(secretsInput) {
     }
     return output;
 }
-
 /**
  * @param {string} inputKey
  * @param {any} inputOptions
  */
 function parseHeadersInput(inputKey, inputOptions) {
-    /** @type {string}*/
     const rawHeadersString = getInput(inputKey, inputOptions) || '';
     const headerStrings = rawHeadersString
         .split('\n')
@@ -45208,31 +45121,44 @@ function parseHeadersInput(inputKey, inputOptions) {
         .filter(line => line !== '');
     return headerStrings
         .reduce((map, line) => {
-            const separator = line.indexOf(':');
-            const key = line.substring(0, separator).trim().toLowerCase();
-            const value = line.substring(separator + 1).trim();
-            if (map.has(key)) {
-                map.set(key, [map.get(key), value].join(', '));
-            } else {
-                map.set(key, value);
-            }
-            return map;
-        }, new Map());
+        const separator = line.indexOf(':');
+        const key = line.substring(0, separator).trim().toLowerCase();
+        const value = line.substring(separator + 1).trim();
+        if (map.has(key)) {
+            map.set(key, [map.get(key), value].join(', '));
+        }
+        else {
+            map.set(key, value);
+        }
+        return map;
+    }, new Map());
 }
 
 
-
-;// CONCATENATED MODULE: ./src/entry.js
-
+;// CONCATENATED MODULE: ./src/main.ts
 
 
-(async () => {
+/**
+ * The main function for the action.
+ *
+ * @returns {Promise<void>} Resolves when the action is complete.
+ */
+async function run() {
     try {
         await group('Get Infisical Secrets', exportSecrets);
-    } catch (error) {
+    }
+    catch (error) {
         const message = (error instanceof Error) ? error.message : JSON.stringify(error);
         setOutput("errorMessage", message);
         setFailed(message);
     }
-})();
+}
+
+;// CONCATENATED MODULE: ./src/index.ts
+/**
+ * The entrypoint for the action. This file simply imports and runs the action's
+ * main logic.
+ */
+
+run();
 

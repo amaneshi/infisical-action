@@ -4,8 +4,15 @@
   "description": "A Github Action that allows you to consume infisical secrets as secure environment variables.",
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
-    "build": "ncc build src/entry.js -o dist"
+    "build": "ncc build src/index.ts -o dist",
+    "local-action": "npx @github/local-action . src/main.ts .env"
   },
   "files": [
     "src/**/*",
@@ -21,7 +28,7 @@
     "github",
     "actions",
     "github-actions",
-    "javascript"
+    "typescript"
   ],
   "author": "amaneshi",
   "license": "MIT",
@@ -29,9 +36,6 @@
     "url": "https://github.com/amaneshi/infisical-action/issues"
   },
   "homepage": "https://github.com/amaneshi/infisical-action#readme",
-  "engines": {
-    "node": ">=24"
-  },
   "dependencies": {
     "got": "^15.0.5"
   },
@@ -41,6 +45,7 @@
   "devDependencies": {
     "@actions/core": "^3.0.1",
     "@types/node": "^25.9.1",
-    "@vercel/ncc": "^0.38.4"
+    "@vercel/ncc": "^0.38.4",
+    "typescript": "^5.9.3"
   }
 }

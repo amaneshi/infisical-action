@@ -3,7 +3,7 @@
  * @param {string} dataKey
  * @param {boolean=} isEnvVar
  */
-function normalizeOutputKey(dataKey, isEnvVar = false) {
+function normalizeOutputKey(dataKey: string, isEnvVar: boolean = false) {
     let outputKey = dataKey
         .replace(".", "__")
         .replace(new RegExp("-", "g"), "")
