@@ -1,12 +1,11 @@
-// @ts-check
-import core from '@actions/core';
-import got from 'got';
+import * as core from '@actions/core';
+import * as got from 'got';
 
 /***
  * Authenticate with Infisical and retrieve a Bearer token that can be used for requests.
  * @param {import('got').Got} client
  */
-async function retrieveToken(client) {
+async function retrieveToken(client: got.Got): Promise<string> {
     const path = `api/v1/auth/universal-auth/login`
     const clientId = core.getInput('clientId', {required: true});
     const clientSecret = core.getInput('clientSecret', {required: true});
@@ -19,20 +18,16 @@ async function retrieveToken(client) {
  * @param {string} path
  * @param {any} payload
  */
-async function getClientToken(client, path, payload) {
-    /** @type {'json'} */
-    const responseType = 'json';
+async function getClientToken(client: got.Got, path: string, payload: any): Promise<string> {
     const options = {
         json: payload,
-        responseType,
     };
 
     core.debug(`Retrieving Auth Token from ${path} endpoint`);
 
-    /** @type {import('got').Response<LoginResponse>} */
-    let response;
+    let response: LoginResponse;
     try {
-        response = await client.post(`${path}`, options);
+        response = await client.post(path, options).json();
     } catch (err) {
         if (err instanceof got.HTTPError) {
             throw Error(`failed to retrieve auth token. code: ${err.code}, message: ${err.message}, loginResponse: ${JSON.stringify(err.response.body)}`)
@@ -40,24 +35,21 @@ async function getClientToken(client, path, payload) {
             throw err
         }
     }
-    if (response && response.body && response.body.accessToken) {
+    if (response.accessToken) {
         core.debug('✔ Auth Token successfully retrieved');
 
-        return response.body.accessToken;
+        return response.accessToken;
     } else {
         throw Error(`Unable to retrieve token from Universal Auth endpoint.`);
     }
 }
 
-/***
- * @typedef {Object} LoginResponse
- * @property {{
- *  accessToken: string;
- *  tokenType: string;
- *  expiresIn: number;
- *  accessTokenMaxTTL: number;
- * }} auth
- */
+interface LoginResponse {
+    accessToken: string;
+    tokenType: string;
+    expiresIn: number;
+    accessTokenMaxTTL: number;
+}
 
 export {
     retrieveToken,

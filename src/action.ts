@@ -1,5 +1,6 @@
-import core from '@actions/core';
-import got from 'got';
+import * as core from '@actions/core';
+import * as got from 'got';
+import {Buffer} from 'node:buffer';
 
 import {normalizeOutputKey} from './utils.js';
 import {retrieveToken} from './auth.js';
@@ -22,20 +23,21 @@ async function exportSecrets() {
 
     const defaultOptions = {
         prefixUrl: backendUrl,
-        headers: {},
-        https: {},
+        headers: {} as got.Headers,
+        https: {} as got.HttpsOptions,
+        searchParams: {} as got.SearchParameters,
         retry: {
             statusCodes: [
-                ...got.defaults.options.retry.statusCodes,
+                ...(got.default.defaults.options.retry.statusCodes ?? []),
                 // Backend returns 412 when the token in use hasn't yet been replicated
                 // to the performance replica queried. See issue #332.
                 412,
             ]
-        }
+        } as got.RetryOptions
     }
 
     const tlsSkipVerify = (core.getInput('tlsSkipVerify', {required: false}) || 'false').toLowerCase() !== 'false';
-    if (tlsSkipVerify === true) {
+    if (tlsSkipVerify) {
         defaultOptions.https.rejectUnauthorized = false;
     }
 
@@ -43,11 +45,11 @@ async function exportSecrets() {
         defaultOptions.headers[headerName] = headerValue;
     }
 
-    const authToken = await retrieveToken(got.extend(defaultOptions));
+    const authToken = await retrieveToken(got.default.extend(defaultOptions));
     core.setSecret(authToken)
     defaultOptions.headers['Authorization'] = "Bearer " + authToken;
-    defaultOptions.searchParams = {workspaceId: workspaceId, environment: environment};
-    const client = got.extend(defaultOptions);
+    defaultOptions.searchParams = {projectId: workspaceId, environment: environment};
+    const client = got.default.extend(defaultOptions);
 
     const results = await getSecrets(secretRequests, client, ignoreNotFound);
 
@@ -57,14 +59,9 @@ async function exportSecrets() {
 
         let value = result.value;
         const request = result.request;
-        const cachedResponse = result.cachedResponse;
-
-        if (cachedResponse) {
-            core.debug('ℹ using cached response');
-        }
 
         // if a secret is encoded, decode it
-        if (ENCODING_TYPES.includes(secretEncodingType)) {
+        if (ENCODING_TYPES.includes(secretEncodingType) && Buffer.isEncoding(secretEncodingType)) {
             value = Buffer.from(value, secretEncodingType).toString();
         }
 
@@ -74,25 +71,25 @@ async function exportSecrets() {
             }
         }
         if (exportEnv) {
-            core.exportVariable(request.envVarName, `${value}`);
+            core.exportVariable(request.envVarName!, `${value}`);
         }
-        core.setOutput(request.outputVarName, `${value}`);
+        core.setOutput(request.outputVarName!, `${value}`);
         core.debug(`✔ ${request.path} => outputs.${request.outputVarName}${exportEnv ? ` | env.${request.envVarName}` : ''}`);
     }
 }
 
-/** @typedef {Object} SecretRequest
- * @property {string} path
- * @property {string} envVarName
- * @property {string} outputVarName
- * @property {string} selector
- */
+interface SecretRequest {
+    path: string;
+    envVarName: string;
+    outputVarName: string;
+    selector: string;
+}
 
 /**
  * Parses a secrets input string into key paths and their resulting environment variable name.
  * @param {string} secretsInput
  */
-function parseSecretsInput(secretsInput) {
+function parseSecretsInput(secretsInput: string): SecretRequest[] {
     if (!secretsInput) {
         return []
     }
@@ -103,21 +100,15 @@ function parseSecretsInput(secretsInput) {
         .map(key => key.trim())
         .filter(key => key.length !== 0);
 
-    /** @type {SecretRequest[]} */
-    const output = [];
+    const output: SecretRequest[] = [];
     for (const secret of secrets) {
-        let pathSpec = secret;
-        let outputVarName = null;
 
-        const renameSigilIndex = secret.lastIndexOf('|');
-        if (renameSigilIndex > -1) {
-            pathSpec = secret.substring(0, renameSigilIndex).trim();
-            outputVarName = secret.substring(renameSigilIndex + 1).trim();
+        const secretParts = secret
+            .split('|')
+            .map(part => part.trim())
+            .filter(part => part.length !== 0);
 
-            if (outputVarName.length < 1) {
-                throw Error(`You must provide a value when mapping a secret to a name. Input: "${secret}"`);
-            }
-        }
+        let pathSpec = secretParts[0];
 
         const pathParts = pathSpec
             .split(/\s+/)
@@ -130,11 +121,8 @@ function parseSecretsInput(secretsInput) {
 
         const [path, selector] = pathParts;
 
-        let envVarName = outputVarName;
-        if (!outputVarName) {
-            outputVarName = normalizeOutputKey(selector);
-            envVarName = normalizeOutputKey(selector, true);
-        }
+        let outputVarName = secretParts.length > 1 ? secretParts[1] : normalizeOutputKey(selector);
+        let envVarName = secretParts.length > 1 ? secretParts[1] : normalizeOutputKey(selector, true);
 
         output.push({
             path,
@@ -150,9 +138,8 @@ function parseSecretsInput(secretsInput) {
  * @param {string} inputKey
  * @param {any} inputOptions
  */
-function parseHeadersInput(inputKey, inputOptions) {
-    /** @type {string}*/
-    const rawHeadersString = core.getInput(inputKey, inputOptions) || '';
+function parseHeadersInput(inputKey: string, inputOptions: any) {
+    const rawHeadersString: string = core.getInput(inputKey, inputOptions) || '';
     const headerStrings = rawHeadersString
         .split('\n')
         .map(line => line.trim())
